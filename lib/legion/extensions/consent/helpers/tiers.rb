@@ -15,7 +15,7 @@ module Legion
           PROMOTION_THRESHOLD   = 0.8  # success rate needed to promote
           DEMOTION_THRESHOLD    = 0.5  # success rate below which demotion occurs
           MIN_ACTIONS_TO_PROMOTE = 10  # minimum actions before tier change
-          PROMOTION_COOLDOWN    = 86_400 # seconds between tier changes (24h)
+          PROMOTION_COOLDOWN = 86_400 # seconds between tier changes (24h)
 
           # Tier ordering (lower index = more autonomy)
           TIER_ORDER = { autonomous: 0, act_notify: 1, consult: 2, human_only: 3 }.freeze

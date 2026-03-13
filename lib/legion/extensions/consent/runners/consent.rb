@@ -11,12 +11,12 @@ module Legion
           def check_consent(domain:, action_type: :general, **)
             tier = consent_map.get_tier(domain)
             {
-              domain:      domain,
-              tier:        tier,
-              allowed:     tier == :autonomous,
-              needs_notify: tier == :act_notify,
+              domain:        domain,
+              tier:          tier,
+              allowed:       tier == :autonomous,
+              needs_notify:  tier == :act_notify,
               needs_consult: tier == :consult,
-              human_only:  tier == :human_only
+              human_only:    tier == :human_only
             }
           end
 
@@ -52,9 +52,7 @@ module Legion
           end
 
           def apply_tier_change(domain:, new_tier:, **)
-            unless Helpers::Tiers.valid_tier?(new_tier)
-              return { error: :invalid_tier, valid_tiers: Helpers::Tiers::TIERS }
-            end
+            return { error: :invalid_tier, valid_tiers: Helpers::Tiers::TIERS } unless Helpers::Tiers.valid_tier?(new_tier)
 
             old_tier = consent_map.get_tier(domain)
             consent_map.set_tier(domain, new_tier)
