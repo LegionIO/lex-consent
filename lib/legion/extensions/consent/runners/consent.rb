@@ -10,6 +10,8 @@ module Legion
 
           def check_consent(domain:, _action_type: :general, **)
             tier = consent_map.get_tier(domain)
+            Legion::Logging.debug "[consent] check: domain=#{domain} tier=#{tier} allowed=#{tier == :autonomous}"
+
             {
               domain:        domain,
               tier:          tier,
@@ -22,11 +24,15 @@ module Legion
 
           def record_action(domain:, success:, **)
             consent_map.record_outcome(domain, success: success)
+            rate = consent_map.success_rate(domain)
+            total = consent_map.domains[domain][:total_actions]
+            Legion::Logging.info "[consent] action recorded: domain=#{domain} success=#{success} rate=#{rate.round(2)} total=#{total}"
+
             {
               domain:       domain,
               success:      success,
-              success_rate: consent_map.success_rate(domain),
-              total:        consent_map.domains[domain][:total_actions]
+              success_rate: rate,
+              total:        total
             }
           end
 
@@ -44,8 +50,12 @@ module Legion
             case recommendation
             when :promote
               result[:proposed_tier] = Helpers::Tiers.promote(current)
+              Legion::Logging.info "[consent] tier change: domain=#{domain} recommend=promote from=#{current} to=#{result[:proposed_tier]}"
             when :demote
               result[:proposed_tier] = Helpers::Tiers.demote(current)
+              Legion::Logging.warn "[consent] tier change: domain=#{domain} recommend=demote from=#{current} to=#{result[:proposed_tier]}"
+            else
+              Legion::Logging.debug "[consent] tier eval: domain=#{domain} current=#{current} recommendation=#{recommendation}"
             end
 
             result
@@ -56,12 +66,15 @@ module Legion
 
             old_tier = consent_map.get_tier(domain)
             consent_map.set_tier(domain, new_tier)
-            { domain: domain, old_tier: old_tier, new_tier: new_tier, changed: old_tier != new_tier }
+            changed = old_tier != new_tier
+            Legion::Logging.info "[consent] tier applied: domain=#{domain} old=#{old_tier} new=#{new_tier} changed=#{changed}"
+            { domain: domain, old_tier: old_tier, new_tier: new_tier, changed: changed }
           end
 
           def consent_status(domain: nil, **)
             if domain
               entry = consent_map.domains[domain]
+              Legion::Logging.debug "[consent] status: domain=#{domain} tier=#{entry[:tier]} total=#{entry[:total_actions]}"
               {
                 domain:       domain,
                 tier:         entry[:tier],
@@ -70,6 +83,7 @@ module Legion
                 eligible:     consent_map.eligible_for_change?(domain)
               }
             else
+              Legion::Logging.debug "[consent] status: domains=#{consent_map.domain_count}"
               { domains: consent_map.to_h, count: consent_map.domain_count }
             end
           end
