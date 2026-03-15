@@ -25,7 +25,9 @@ lib/legion/extensions/consent/
     tiers.rb        # TIERS, TIER_ORDER, thresholds, promote/demote helpers
     consent_map.rb  # ConsentMap class - per-domain state and history
   runners/
-    consent.rb      # check_consent, record_action, evaluate_tier_change, apply_tier_change, consent_status
+    consent.rb      # check_consent, record_action, evaluate_tier_change, apply_tier_change, consent_status, evaluate_all_tiers
+  actors/
+    tier_evaluation.rb  # TierEvaluation - Every 3600s, sweeps all domains for eligible tier changes
 spec/
   legion/extensions/consent/
     helpers/
@@ -69,6 +71,16 @@ TIER_ORDER = { autonomous: 0, act_notify: 1, consult: 2, human_only: 3 }
 
 Lower TIER_ORDER index = more autonomous. `Tiers.promote` decrements index, `Tiers.demote` increments. Both are no-ops at the boundary values.
 
+## Actors
+
+| Actor | Interval | Runner | Method | Purpose |
+|---|---|---|---|---|
+| `TierEvaluation` | Every 3600s | `Runners::Consent` | `evaluate_all_tiers` | Sweeps all domains for eligible tier promotions or demotions |
+
+### TierEvaluation
+
+Hourly sweep that calls `consent_map.evaluate_promotion(domain)` for every tracked domain and collects the results into two lists: domains eligible for promotion and domains due for demotion. Does not apply tier changes — it only identifies candidates. Returns `{ evaluated: Integer, promotions: Array, demotions: Array }`. Actual application of a change still requires an explicit `apply_tier_change` call.
+
 ## Runner Logic
 
 - `check_consent` - reads tier, computes boolean flags (`allowed`, `needs_notify`, `needs_consult`, `human_only`)
@@ -76,6 +88,7 @@ Lower TIER_ORDER index = more autonomous. `Tiers.promote` decrements index, `Tie
 - `evaluate_tier_change` - calls `evaluate_promotion`, optionally appends `proposed_tier`
 - `apply_tier_change` - validates tier, calls `set_tier` (which updates history and cooldown timestamp)
 - `consent_status` - without `domain:` returns all domains via `to_h`
+- `evaluate_all_tiers` - sweeps all domains and returns promotion/demotion candidate lists without applying changes
 
 ## Integration Points
 
@@ -88,3 +101,4 @@ Lower TIER_ORDER index = more autonomous. `Tiers.promote` decrements index, `Tie
 - `@consent_map` is per-runner-instance; multiple runner instances would have independent state
 - The `_action_type:` parameter in `check_consent` is intentionally ignored (reserved for future use)
 - History is capped at 50 entries via `shift while size > 50`
+- `evaluate_all_tiers` reads from `consent_map.domains.each_key` — only domains that have been previously accessed (auto-populated by the default Hash) are evaluated; domains never touched are not in the sweep
