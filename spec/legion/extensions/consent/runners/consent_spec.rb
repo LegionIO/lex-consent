@@ -63,6 +63,42 @@ RSpec.describe Legion::Extensions::Consent::Runners::Consent do
     end
   end
 
+  describe '#evaluate_all_tiers' do
+    it 'returns zero evaluated for empty consent map' do
+      result = client.evaluate_all_tiers
+      expect(result[:evaluated]).to eq(0)
+      expect(result[:promotions]).to eq([])
+      expect(result[:demotions]).to eq([])
+    end
+
+    it 'includes promoted domains in promotions list' do
+      15.times { client.record_action(domain: 'calendar', success: true) }
+      result = client.evaluate_all_tiers
+      expect(result[:promotions]).to include('calendar')
+    end
+
+    it 'includes demoted domains in demotions list' do
+      4.times { client.record_action(domain: 'risky', success: true) }
+      8.times { client.record_action(domain: 'risky', success: false) }
+      result = client.evaluate_all_tiers
+      expect(result[:demotions]).to include('risky')
+    end
+
+    it 'returns evaluated count matching number of known domains' do
+      client.record_action(domain: 'email', success: true)
+      client.record_action(domain: 'calendar', success: true)
+      result = client.evaluate_all_tiers
+      expect(result[:evaluated]).to eq(2)
+    end
+
+    it 'does not include ineligible domains in promotions or demotions' do
+      client.record_action(domain: 'email', success: true)
+      result = client.evaluate_all_tiers
+      expect(result[:promotions]).not_to include('email')
+      expect(result[:demotions]).not_to include('email')
+    end
+  end
+
   describe '#consent_status' do
     it 'returns domain-specific status' do
       client.record_action(domain: 'email', success: true)

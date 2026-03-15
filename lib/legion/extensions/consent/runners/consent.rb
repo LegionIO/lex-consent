@@ -71,6 +71,23 @@ module Legion
             { domain: domain, old_tier: old_tier, new_tier: new_tier, changed: changed }
           end
 
+          def evaluate_all_tiers(**)
+            promotions = []
+            demotions = []
+
+            consent_map.domains.each_key do |domain|
+              result = consent_map.evaluate_promotion(domain)
+              promotions << domain if result == :promote
+              demotions << domain if result == :demote
+            end
+
+            evaluated = consent_map.domain_count
+            Legion::Logging.debug "[consent] tier evaluation sweep: domains=#{evaluated} " \
+                                  "promotions=#{promotions.size} demotions=#{demotions.size}"
+
+            { evaluated: evaluated, promotions: promotions, demotions: demotions }
+          end
+
           def consent_status(domain: nil, **)
             if domain
               entry = consent_map.domains[domain]
