@@ -80,6 +80,12 @@ Legion::Extensions::Consent::Runners::Consent.consent_status(domain: :file_syste
 Legion::Extensions::Consent::Runners::Consent.consent_status
 ```
 
+## Actors
+
+| Actor | Interval | Description |
+|-------|----------|-------------|
+| `TierEvaluation` | Every 3600s | Periodically sweeps all known domains for eligible tier promotions or demotions based on accumulated success/failure history |
+
 ## Development
 
 ```bash
