@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module Legion
   module Extensions
     module Consent
@@ -18,6 +20,7 @@ module Legion
                 history:         []
               }
             end
+            load_from_local
           end
 
           def get_tier(domain)
@@ -92,6 +95,57 @@ module Legion
             @domains.transform_values do |v|
               { tier: v[:tier], success_rate: success_rate_from(v), total_actions: v[:total_actions] }
             end
+          end
+
+          def save_to_local
+            return unless defined?(Legion::Data::Local) && Legion::Data::Local.connected?
+
+            dataset = Legion::Data::Local.connection[:consent_domains]
+            @domains.each do |domain_key, entry|
+              row = {
+                domain_key:      domain_key,
+                tier:            entry[:tier].to_s,
+                success_count:   entry[:success_count],
+                failure_count:   entry[:failure_count],
+                total_actions:   entry[:total_actions],
+                last_changed_at: entry[:last_changed_at],
+                history:         ::JSON.generate(entry[:history].map { |h| h.transform_values(&:to_s) })
+              }
+              existing = dataset.where(domain_key: domain_key).first
+              if existing
+                dataset.where(domain_key: domain_key).update(row.reject { |k, _| k == :domain_key })
+              else
+                dataset.insert(row)
+              end
+            end
+          rescue StandardError => e
+            Legion::Logging.warn "[consent] save_to_local failed: #{e.message}" if defined?(Legion::Logging)
+          end
+
+          def load_from_local
+            return unless defined?(Legion::Data::Local) && Legion::Data::Local.connected?
+
+            Legion::Data::Local.connection[:consent_domains].each do |row|
+              key = row[:domain_key]
+              history = begin
+                ::JSON.parse(row[:history] || '[]', symbolize_names: false).map do |h|
+                  { from: h['from'].to_sym, to: h['to'].to_sym, at: h['at'] }
+                end
+              rescue StandardError
+                []
+              end
+
+              @domains[key] = {
+                tier:            row[:tier].to_sym,
+                success_count:   row[:success_count].to_i,
+                failure_count:   row[:failure_count].to_i,
+                total_actions:   row[:total_actions].to_i,
+                last_changed_at: row[:last_changed_at],
+                history:         history
+              }
+            end
+          rescue StandardError => e
+            Legion::Logging.warn "[consent] load_from_local failed: #{e.message}" if defined?(Legion::Logging)
           end
 
           private

@@ -12,3 +12,10 @@ module Legion
     end
   end
 end
+
+if defined?(Legion::Data::Local)
+  Legion::Data::Local.register_migrations(
+    name: :consent,
+    path: File.join(__dir__, 'consent', 'local_migrations')
+  )
+end
