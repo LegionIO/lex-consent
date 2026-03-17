@@ -88,6 +88,113 @@ module Legion
             { evaluated: evaluated, promotions: promotions, demotions: demotions }
           end
 
+          def request_autonomous_approval(domain:, **)
+            map = consent_map
+            current_tier = map.get_tier(domain)
+
+            return { requested: false, error: 'already_autonomous' } if current_tier == :autonomous
+            return { requested: false, error: 'already_pending' } if map.pending?(domain)
+
+            map.set_pending(domain, proposed_tier: :autonomous, requested_by: 'tier_evaluation')
+
+            if defined?(Legion::Events)
+              rate = map.success_rate(domain)
+              total = map.domains[domain][:total_actions]
+              Legion::Events.emit('consent.approval_required', {
+                                    domain:        domain,
+                                    current_tier:  current_tier,
+                                    proposed_tier: :autonomous,
+                                    success_rate:  rate,
+                                    total_actions: total,
+                                    requested_at:  Time.now.utc
+                                  })
+            end
+
+            { requested: true, domain: domain, current_tier: current_tier, proposed_tier: :autonomous }
+          end
+
+          def approve_promotion(domain:, approved_by:, **)
+            map = consent_map
+            return { approved: false, error: 'no_pending_approval' } unless map.pending?(domain)
+
+            pending_tier = map.domains[domain][:pending_tier]
+            old_tier = map.get_tier(domain)
+            map.clear_pending(domain)
+            map.set_tier(domain, pending_tier)
+
+            if defined?(Legion::Events)
+              Legion::Events.emit('consent.promotion_approved', {
+                                    domain: domain, old_tier: old_tier, new_tier: pending_tier,
+                                    approved_by: approved_by, at: Time.now.utc
+                                  })
+            end
+
+            { approved: true, domain: domain, old_tier: old_tier, new_tier: pending_tier, approved_by: approved_by }
+          end
+
+          def reject_promotion(domain:, rejected_by:, reason: nil, **)
+            map = consent_map
+            return { rejected: false, error: 'no_pending_approval' } unless map.pending?(domain)
+
+            map.clear_pending(domain)
+
+            if defined?(Legion::Events)
+              Legion::Events.emit('consent.promotion_rejected', {
+                                    domain: domain, rejected_by: rejected_by, reason: reason, at: Time.now.utc
+                                  })
+            end
+
+            { rejected: true, domain: domain, rejected_by: rejected_by, reason: reason }
+          end
+
+          def expire_pending_approvals(timeout: Helpers::ConsentMap::APPROVAL_TIMEOUT, **)
+            map = consent_map
+            expired = 0
+
+            map.domains.each_key do |domain|
+              next unless map.pending?(domain)
+              next unless map.pending_expired?(domain, timeout: timeout)
+
+              map.clear_pending(domain)
+              expired += 1
+            end
+
+            { expired: expired }
+          end
+
+          def evaluate_and_apply_tiers(**)
+            candidates = evaluate_all_tiers
+            applied_promotions = 0
+            applied_demotions = 0
+            approval_requests = 0
+
+            Array(candidates[:promotions]).each do |domain|
+              current = consent_map.get_tier(domain)
+              proposed = Helpers::Tiers.promote(current)
+
+              if proposed == :autonomous
+                result = request_autonomous_approval(domain: domain)
+                approval_requests += 1 if result[:requested]
+              else
+                apply_tier_change(domain: domain, new_tier: proposed)
+                applied_promotions += 1
+              end
+            end
+
+            Array(candidates[:demotions]).each do |domain|
+              current = consent_map.get_tier(domain)
+              proposed = Helpers::Tiers.demote(current)
+              apply_tier_change(domain: domain, new_tier: proposed)
+              applied_demotions += 1
+            end
+
+            expired = expire_pending_approvals
+
+            { evaluated: candidates[:evaluated], applied_promotions: applied_promotions,
+              applied_demotions: applied_demotions, approval_requests: approval_requests,
+              expired_approvals: expired[:expired] }
+          end
+
           def consent_status(domain: nil, **)
             if domain
               entry = consent_map.domains[domain]

@@ -11,7 +11,7 @@ Four-tier consent gradient with earned autonomy for the LegionIO cognitive archi
 ## Gem Info
 
 - **Gem name**: `lex-consent`
-- **Version**: `0.1.0`
+- **Version**: `0.2.0`
 - **Module**: `Legion::Extensions::Consent`
 - **Ruby**: `>= 3.4`
 - **License**: MIT
@@ -25,7 +25,7 @@ lib/legion/extensions/consent/
     tiers.rb        # TIERS, TIER_ORDER, thresholds, promote/demote helpers
     consent_map.rb  # ConsentMap class - per-domain state and history
   runners/
-    consent.rb      # check_consent, record_action, evaluate_tier_change, apply_tier_change, consent_status, evaluate_all_tiers
+    consent.rb      # check_consent, record_action, evaluate_tier_change, apply_tier_change, consent_status, evaluate_all_tiers, request_autonomous_approval, approve_promotion, reject_promotion, expire_pending_approvals, evaluate_and_apply_tiers
   actors/
     tier_evaluation.rb  # TierEvaluation - Every 3600s, sweeps all domains for eligible tier changes
 spec/
@@ -54,14 +54,19 @@ TIER_ORDER = { autonomous: 0, act_notify: 1, consult: 2, human_only: 3 }
 `Helpers::ConsentMap` holds per-domain state using a default-populating Hash. Each domain entry:
 ```ruby
 {
-  tier:            :consult,      # current tier
-  success_count:   0,
-  failure_count:   0,
-  total_actions:   0,
-  last_changed_at: nil,
-  history:         []             # capped at 50 tier changes
+  tier:                 :consult,      # current tier
+  success_count:        0,
+  failure_count:        0,
+  total_actions:        0,
+  last_changed_at:      nil,
+  history:              [],            # capped at 50 tier changes
+  pending_tier:         nil,           # proposed tier awaiting human approval
+  pending_since:        nil,           # timestamp of approval request
+  pending_requested_by: nil            # who requested the promotion
 }
 ```
+
+`APPROVAL_TIMEOUT = 259_200` (72 hours) — stale pending approvals are expired by `expire_pending_approvals`.
 
 `eligible_for_change?` returns false if `total_actions < MIN_ACTIONS_TO_PROMOTE` or cooldown not elapsed.
 
@@ -75,11 +80,18 @@ Lower TIER_ORDER index = more autonomous. `Tiers.promote` decrements index, `Tie
 
 | Actor | Interval | Runner | Method | Purpose |
 |---|---|---|---|---|
-| `TierEvaluation` | Every 3600s | `Runners::Consent` | `evaluate_all_tiers` | Sweeps all domains for eligible tier promotions or demotions |
+| `TierEvaluation` | Every 3600s | `Runners::Consent` | `evaluate_and_apply_tiers` | Sweeps all domains, auto-applies non-autonomous tier changes, gates autonomous promotions with human approval |
 
 ### TierEvaluation
 
-Hourly sweep that calls `consent_map.evaluate_promotion(domain)` for every tracked domain and collects the results into two lists: domains eligible for promotion and domains due for demotion. Does not apply tier changes — it only identifies candidates. Returns `{ evaluated: Integer, promotions: Array, demotions: Array }`. Actual application of a change still requires an explicit `apply_tier_change` call.
+Hourly sweep that orchestrates the full tier lifecycle:
+1. Calls `evaluate_all_tiers` to identify promotion/demotion candidates
+2. Auto-applies non-autonomous promotions (e.g., `consult` -> `act_notify`)
+3. For promotions to `autonomous`, calls `request_autonomous_approval` instead of auto-applying
+4. Auto-applies all demotions
+5. Expires stale pending approvals (>72 hours)
+
+Returns `{ evaluated:, applied_promotions:, applied_demotions:, approval_requests:, expired_approvals: }`.
 
 ## Runner Logic
 
@@ -89,6 +101,11 @@ Hourly sweep that calls `consent_map.evaluate_promotion(domain)` for every track
 - `apply_tier_change` - validates tier, calls `set_tier` (which updates history and cooldown timestamp)
 - `consent_status` - without `domain:` returns all domains via `to_h`
 - `evaluate_all_tiers` - sweeps all domains and returns promotion/demotion candidate lists without applying changes
+- `request_autonomous_approval` - sets pending state, emits `consent.approval_required` event
+- `approve_promotion` - applies pending tier, emits `consent.promotion_approved` event
+- `reject_promotion` - clears pending state, emits `consent.promotion_rejected` event
+- `expire_pending_approvals` - clears stale approvals past 72h timeout
+- `evaluate_and_apply_tiers` - full orchestration: evaluate, auto-apply non-autonomous changes, gate autonomous with approval, expire stale
 
 ## Integration Points
 

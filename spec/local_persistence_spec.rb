@@ -42,7 +42,7 @@ RSpec.describe 'lex-consent local SQLite persistence' do
 
   after do
     db.disconnect
-    File.delete(db_path) if File.exist?(db_path)
+    FileUtils.rm_f(db_path)
   end
 
   describe 'save_to_local' do

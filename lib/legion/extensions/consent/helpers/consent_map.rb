@@ -7,17 +7,22 @@ module Legion
     module Consent
       module Helpers
         class ConsentMap
+          APPROVAL_TIMEOUT = 259_200 # 72 hours
+
           attr_reader :domains
 
           def initialize
             @domains = Hash.new do |h, k|
               h[k] = {
-                tier:            Tiers::DEFAULT_TIER,
-                success_count:   0,
-                failure_count:   0,
-                total_actions:   0,
-                last_changed_at: nil,
-                history:         []
+                tier:                 Tiers::DEFAULT_TIER,
+                success_count:        0,
+                failure_count:        0,
+                total_actions:        0,
+                last_changed_at:      nil,
+                history:              [],
+                pending_tier:         nil,
+                pending_since:        nil,
+                pending_requested_by: nil
               }
             end
             load_from_local
@@ -93,8 +98,36 @@ module Legion
 
           def to_h
             @domains.transform_values do |v|
-              { tier: v[:tier], success_rate: success_rate_from(v), total_actions: v[:total_actions] }
+              { tier: v[:tier], success_rate: success_rate_from(v), total_actions: v[:total_actions],
+                pending_tier: v[:pending_tier], pending_since: v[:pending_since] }
             end
+          end
+
+          def set_pending(domain, proposed_tier:, requested_by: 'system')
+            entry = @domains[domain]
+            entry[:pending_tier] = proposed_tier
+            entry[:pending_since] = Time.now
+            entry[:pending_requested_by] = requested_by
+            entry
+          end
+
+          def clear_pending(domain)
+            entry = @domains[domain]
+            entry[:pending_tier] = nil
+            entry[:pending_since] = nil
+            entry[:pending_requested_by] = nil
+            entry
+          end
+
+          def pending?(domain)
+            !@domains[domain][:pending_tier].nil?
+          end
+
+          def pending_expired?(domain, timeout: APPROVAL_TIMEOUT)
+            entry = @domains[domain]
+            return false unless entry[:pending_since]
+
+            Time.now - entry[:pending_since] > timeout
           end
 
           def save_to_local
@@ -113,7 +146,7 @@ module Legion
               }
               existing = dataset.where(domain_key: domain_key).first
               if existing
-                dataset.where(domain_key: domain_key).update(row.reject { |k, _| k == :domain_key })
+                dataset.where(domain_key: domain_key).update(row.except(:domain_key))
               else
                 dataset.insert(row)
               end

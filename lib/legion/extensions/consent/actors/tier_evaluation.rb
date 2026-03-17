@@ -12,7 +12,7 @@ module Legion
           end
 
           def runner_function
-            'evaluate_all_tiers'
+            'evaluate_and_apply_tiers'
           end
 
           def time

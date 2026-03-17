@@ -21,7 +21,7 @@ RSpec.describe Legion::Extensions::Consent::Actor::TierEvaluation do
   end
 
   describe '#runner_function' do
-    it { expect(actor.runner_function).to eq 'evaluate_all_tiers' }
+    it { expect(actor.runner_function).to eq 'evaluate_and_apply_tiers' }
   end
 
   describe '#time' do
